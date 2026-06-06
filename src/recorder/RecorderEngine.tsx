@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import type { Point } from '../store/useStore';
+import { Loader2 } from 'lucide-react';
 
 const lerp = (start: number, end: number, t: number) => {
   return start * (1 - t) + end * t;
@@ -126,6 +127,14 @@ const RecorderEngine = () => {
 
   const processVideo = async () => {
     setIsProcessing(true);
+    
+    // Bring this tab to the foreground so requestAnimationFrame runs at 60fps instead of being throttled!
+    chrome.tabs.getCurrent((tab) => {
+      if (tab?.id) {
+        chrome.tabs.update(tab.id, { active: true });
+      }
+    });
+
     const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
     const videoUrl = URL.createObjectURL(blob);
     
@@ -169,15 +178,18 @@ const RecorderEngine = () => {
     exportRecorder.onstop = () => {
       const finalBlob = new Blob(exportChunks, { type: 'video/webm' });
       const url = URL.createObjectURL(finalBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'demolens-final.webm';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setIsProcessing(false);
-      window.close();
+      
+      // Use chrome.downloads API to trigger download reliably from an extension page
+      chrome.downloads.download({
+        url: url,
+        filename: 'demolens-final.webm',
+        saveAs: true // Prompts user to pick Desktop or elsewhere
+      }, () => {
+        setIsProcessing(false);
+        // Revoke after a delay to ensure download starts
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        window.close();
+      });
     };
 
     exportRecorder.start();
@@ -279,9 +291,29 @@ const RecorderEngine = () => {
   };
 
   return (
-    <div style={{ display: 'none' }}>
-      <video ref={videoRef} playsInline muted />
-      <canvas ref={canvasRef} />
+    <div className="w-screen h-screen flex flex-col items-center justify-center text-white font-sans overflow-hidden" 
+         style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)' }}>
+      
+      {/* Hidden elements */}
+      <div style={{ display: 'none' }}>
+        <video ref={videoRef} playsInline muted />
+        <canvas ref={canvasRef} />
+      </div>
+
+      {isProcessing ? (
+        <div className="flex flex-col items-center space-y-6">
+           <div className="relative">
+             <div className="absolute inset-0 bg-indigo-500 blur-[64px] opacity-50 rounded-full animate-pulse w-32 h-32"></div>
+             <Loader2 className="w-20 h-20 text-indigo-400 animate-spin relative z-10" />
+           </div>
+           <div className="text-center z-10">
+             <h2 className="text-4xl font-black bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent tracking-tight">Rendering Magic...</h2>
+             <p className="text-xl text-indigo-200/70 mt-3">Applying cinematic effects at 60 FPS.</p>
+           </div>
+        </div>
+      ) : (
+        <div className="text-indigo-200/40 text-sm tracking-widest uppercase">DemoLens Engine (Idle)</div>
+      )}
     </div>
   );
 };
