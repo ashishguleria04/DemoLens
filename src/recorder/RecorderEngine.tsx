@@ -9,7 +9,23 @@ const lerp = (start: number, end: number, t: number) => {
 const RecorderEngine = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { setIsRecording, setIsProcessing, addMousePoint, addClick, resetStore } = useStore();
+  const { isRecording, isProcessing, setIsRecording, setIsProcessing, addMousePoint, addClick, resetStore } = useStore();
+
+  useEffect(() => {
+    chrome.storage.local.set({ isRecording, isProcessing });
+  }, [isRecording, isProcessing]);
+
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === 'STOP_RECORDING') {
+        stopCapture();
+      }
+    };
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleMessage);
+    };
+  }, []);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
