@@ -65,6 +65,7 @@ const RecorderEngine = () => {
       };
 
       startTimeRef.current = Date.now();
+      chrome.storage.local.set({ recordingStartTime: startTimeRef.current });
       
       const handleMouseMove = (e: MouseEvent) => {
         addMousePoint({ x: e.clientX, y: e.clientY, time: Date.now() - startTimeRef.current });
@@ -95,6 +96,7 @@ const RecorderEngine = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      chrome.storage.local.set({ recordingStartTime: null });
     }
   };
 
@@ -103,12 +105,11 @@ const RecorderEngine = () => {
     let center = null;
     let maxWeight = 0;
 
-    // Linear ease-in-out for zoom within 1000ms window (1 second)
     for (const click of clickPoints) {
       const diff = Math.abs(time - click.time);
       if (diff < 1000) {
         const norm = diff / 1000;
-        const weight = 1 - norm; // 1 at peak (click.time), 0 at edges
+        const weight = 1 - norm; 
         if (weight > maxWeight) {
           maxWeight = weight;
           center = { x: click.x, y: click.y };
@@ -140,10 +141,15 @@ const RecorderEngine = () => {
     }
   };
 
-  const startExportStream = () => {
+  const startExportStream = async () => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     if (!canvas || !video) return;
+
+    // Fetch user preferences for processing
+    const prefs = await chrome.storage.local.get(['autoZoom', 'smoothCursor']);
+    const enableZoom = prefs.autoZoom !== false;
+    const enableCursor = prefs.smoothCursor !== false;
 
     const stream = canvas.captureStream(60);
     const options = { mimeType: 'video/webm; codecs=vp9' };
@@ -171,13 +177,12 @@ const RecorderEngine = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       setIsProcessing(false);
-      window.close(); // Automatically close engine tab when done
+      window.close();
     };
 
     exportRecorder.start();
     video.play();
     
-    // Cache for algorithmic efficiency
     let lastMouseIdx = 0;
     const storeMousePath = useStore.getState().mousePath;
     const storeClicks = useStore.getState().clicks;
@@ -193,70 +198,71 @@ const RecorderEngine = () => {
           ctx.save();
           ctx.clearRect(0, 0, width, height);
 
-          // Apply auto-zoom
-          const zoom = getZoomFactor(currentTimeMs, storeClicks);
-          if (zoom.scale > 1 && zoom.center) {
-            // Remap screen coordinates to canvas coordinates (assuming full screen recording)
-            const cx = zoom.center.x;
-            const cy = zoom.center.y;
-            
-            ctx.translate(cx, cy);
-            ctx.scale(zoom.scale, zoom.scale);
-            ctx.translate(-cx, -cy);
+          // Apply auto-zoom based on preferences
+          if (enableZoom) {
+            const zoom = getZoomFactor(currentTimeMs, storeClicks);
+            if (zoom.scale > 1 && zoom.center) {
+              const cx = zoom.center.x;
+              const cy = zoom.center.y;
+              ctx.translate(cx, cy);
+              ctx.scale(zoom.scale, zoom.scale);
+              ctx.translate(-cx, -cy);
+            }
           }
 
           // Draw the video frame
           ctx.drawImage(video, 0, 0, width, height);
 
-          // Find current mouse position efficiently
-          while (lastMouseIdx < storeMousePath.length - 1 && storeMousePath[lastMouseIdx + 1].time < currentTimeMs) {
-             lastMouseIdx++;
-          }
-          
-          let currentPos = null;
-          if (storeMousePath.length > 0) {
-            if (currentTimeMs <= storeMousePath[0].time) {
-              currentPos = { x: storeMousePath[0].x, y: storeMousePath[0].y };
-            } else if (currentTimeMs >= storeMousePath[storeMousePath.length - 1].time) {
-              const last = storeMousePath[storeMousePath.length - 1];
-              currentPos = { x: last.x, y: last.y };
-            } else {
-              const p1 = storeMousePath[lastMouseIdx];
-              const p2 = storeMousePath[lastMouseIdx + 1];
-              const t = (currentTimeMs - p1.time) / (p2.time - p1.time);
-              currentPos = {
-                x: lerp(p1.x, p2.x, t),
-                y: lerp(p1.y, p2.y, t)
-              };
+          // Draw interpolated cursor based on preferences
+          if (enableCursor) {
+            while (lastMouseIdx < storeMousePath.length - 1 && storeMousePath[lastMouseIdx + 1].time < currentTimeMs) {
+               lastMouseIdx++;
             }
-          }
+            
+            let currentPos = null;
+            if (storeMousePath.length > 0) {
+              if (currentTimeMs <= storeMousePath[0].time) {
+                currentPos = { x: storeMousePath[0].x, y: storeMousePath[0].y };
+              } else if (currentTimeMs >= storeMousePath[storeMousePath.length - 1].time) {
+                const last = storeMousePath[storeMousePath.length - 1];
+                currentPos = { x: last.x, y: last.y };
+              } else {
+                const p1 = storeMousePath[lastMouseIdx];
+                const p2 = storeMousePath[lastMouseIdx + 1];
+                const t = (currentTimeMs - p1.time) / (p2.time - p1.time);
+                currentPos = {
+                  x: lerp(p1.x, p2.x, t),
+                  y: lerp(p1.y, p2.y, t)
+                };
+              }
+            }
 
-          // Draw interpolated cursor
-          if (currentPos) {
-             ctx.beginPath();
-             ctx.moveTo(currentPos.x, currentPos.y);
-             ctx.lineTo(currentPos.x + 15, currentPos.y + 15);
-             ctx.lineTo(currentPos.x + 5, currentPos.y + 15);
-             ctx.lineTo(currentPos.x + 5, currentPos.y + 25);
-             ctx.lineTo(currentPos.x - 2, currentPos.y + 25);
-             ctx.lineTo(currentPos.x - 2, currentPos.y + 15);
-             ctx.lineTo(currentPos.x - 9, currentPos.y + 15);
-             ctx.closePath();
-             
-             ctx.fillStyle = 'rgba(0,0,0,0.8)';
-             ctx.fill();
-             ctx.lineWidth = 1;
-             ctx.strokeStyle = 'white';
-             ctx.stroke();
+            if (currentPos) {
+               ctx.beginPath();
+               ctx.moveTo(currentPos.x, currentPos.y);
+               ctx.lineTo(currentPos.x + 15, currentPos.y + 15);
+               ctx.lineTo(currentPos.x + 5, currentPos.y + 15);
+               ctx.lineTo(currentPos.x + 5, currentPos.y + 25);
+               ctx.lineTo(currentPos.x - 2, currentPos.y + 25);
+               ctx.lineTo(currentPos.x - 2, currentPos.y + 15);
+               ctx.lineTo(currentPos.x - 9, currentPos.y + 15);
+               ctx.closePath();
+               
+               ctx.fillStyle = 'rgba(0,0,0,0.8)';
+               ctx.fill();
+               ctx.lineWidth = 1;
+               ctx.strokeStyle = 'white';
+               ctx.stroke();
 
-             ctx.beginPath();
-             ctx.moveTo(currentPos.x, currentPos.y);
-             ctx.lineTo(currentPos.x + 10, currentPos.y + 10);
-             ctx.lineTo(currentPos.x + 3, currentPos.y + 10);
-             ctx.lineTo(currentPos.x, currentPos.y + 16);
-             ctx.closePath();
-             ctx.fillStyle = 'white';
-             ctx.fill();
+               ctx.beginPath();
+               ctx.moveTo(currentPos.x, currentPos.y);
+               ctx.lineTo(currentPos.x + 10, currentPos.y + 10);
+               ctx.lineTo(currentPos.x + 3, currentPos.y + 10);
+               ctx.lineTo(currentPos.x, currentPos.y + 16);
+               ctx.closePath();
+               ctx.fillStyle = 'white';
+               ctx.fill();
+            }
           }
 
           ctx.restore();
@@ -265,7 +271,6 @@ const RecorderEngine = () => {
       } else if (video.ended) {
         exportRecorder.stop();
       } else {
-         // Pause handling if needed
          animationFrameRef.current = requestAnimationFrame(renderLoop);
       }
     };
