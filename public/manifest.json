@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "DemoLens",
+  "version": "1.0",
+  "description": "Privacy-first screen recorder with smooth cursor interpolation and auto-zoom.",
+  "permissions": ["storage", "tabs", "activeTab"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

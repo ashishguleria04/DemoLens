@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DemoLens Popup</title>
+    <style>
+      body {
+        width: 350px;
+        height: 400px;
+        margin: 0;
+        padding: 0;
+        background-color: #111827; /* Tailwind gray-900 */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import Popup from '/src/popup/Popup.tsx';
+      import '/src/index.css';
+      
+      const container = document.getElementById('root');
+      createRoot(container).render(React.createElement(Popup));
+    </script>
+  </body>
+</html>
